@@ -1,0 +1,92 @@
+/*
+ * Global styles + theme tokens.
+ *
+ * Tailwind v4 reads its theme from CSS via the `@theme` block (no tailwind.config.ts needed).
+ * We define raw CSS variables for both light and dark mode, then expose them as Tailwind
+ * color tokens (bg, fg, accent, etc.) so we can write classes like `bg-bg text-fg`.
+ *
+ * Dark mode is controlled by a `.dark` class on <html>. A tiny script in layout.tsx
+ * sets this class BEFORE React hydrates so there's no flash of light-mode content.
+ */
+
+@import "tailwindcss";
+
+/* Tell Tailwind to switch dark variants on the .dark class instead of media query.
+   We want manual control via the theme toggle, with localStorage persistence. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light mode (default values) */
+:root {
+  --color-bg: #ffffff;            /* page background */
+  --color-fg: #0a0a0a;            /* primary text */
+  --color-muted: #6b7280;         /* secondary text, icons */
+  --color-surface: #f5f5f5;       /* cards, sidebar background */
+  --color-surface-2: #ebebeb;     /* hover/active states */
+  --color-border: #e5e7eb;        /* dividers */
+  --color-accent: #991b1b;        /* darkish red — primary brand accent */
+  --color-accent-hover: #7f1d1d;
+  --color-accent-fg: #ffffff;     /* text on accent backgrounds */
+  --color-danger: #dc2626;        /* destructive action */
+  --color-danger-fg: #ffffff;
+  --color-ring: #991b1b;          /* focus ring */
+}
+
+/* Dark mode overrides */
+.dark {
+  --color-bg: #0a0a0a;
+  --color-fg: #fafafa;
+  --color-muted: #9ca3af;
+  --color-surface: #141414;
+  --color-surface-2: #1f1f1f;
+  --color-border: #262626;
+  --color-accent: #b91c1c;        /* slightly brighter on dark for contrast */
+  --color-accent-hover: #dc2626;
+  --color-accent-fg: #ffffff;
+  --color-danger: #ef4444;
+  --color-danger-fg: #ffffff;
+  --color-ring: #b91c1c;
+}
+
+/* Expose CSS vars as Tailwind utility colors. After this, you can write
+   `bg-bg`, `text-fg`, `bg-accent`, `border-border`, etc. and they'll respond
+   to the .dark class automatically. */
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-fg: var(--color-fg);
+  --color-muted: var(--color-muted);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-border: var(--color-border);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-danger: var(--color-danger);
+  --color-danger-fg: var(--color-danger-fg);
+  --color-ring: var(--color-ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Base body styles. We apply colors here so the entire viewport (not just our app shell)
+   gets themed — this matters for overscroll bounce on mobile. */
+html, body {
+  height: 100%;
+}
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Make focus rings consistent and visible across the app. */
+*:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Disable iOS tap highlight; we use our own focus/active states. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
