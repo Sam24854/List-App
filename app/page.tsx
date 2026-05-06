@@ -34,7 +34,7 @@ export default function Home() {
         >
           <Menu size={22} />
         </button>
-        <h1 className="text-lg font-semibold text-fg">List-App</h1>
+        <h1 className="text-lg font-semibold text-accent">To-Do List</h1>
         <div className="ml-auto">
           <SettingsMenu />
         </div>

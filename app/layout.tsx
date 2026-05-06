@@ -30,7 +30,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "List-App",
+  title: "To-Do List",
   description: "A simple, fast multi-list todo app.",
 };
 
