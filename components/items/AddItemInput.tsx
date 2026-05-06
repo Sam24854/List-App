@@ -34,7 +34,8 @@ export function AddItemInput() {
         onChange={(e) => setText(e.target.value)}
         placeholder="Add a new item..."
         // 16px font-size on inputs prevents iOS Safari from auto-zooming on focus.
-        className="min-h-[44px] flex-1 rounded-md border border-border bg-surface px-3 text-base text-fg placeholder:text-muted"
+        // min-w-0 lets the input shrink so the "+" button can't overflow.
+        className="min-w-0 min-h-[44px] flex-1 rounded-md border border-border bg-surface px-3 text-base text-fg placeholder:text-muted"
       />
       <button
         type="submit"

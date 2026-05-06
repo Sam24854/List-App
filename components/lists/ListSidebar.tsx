@@ -46,6 +46,7 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
     toggleListSelected,
     selectAllLists,
     deleteSelectedLists,
+    deleteCompletedLists,
   } = useLists();
 
   const [newListName, setNewListName] = useState("");
@@ -53,6 +54,14 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
   const [editingName, setEditingName] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmBulk, setConfirmBulk] = useState(false);
+  const [confirmCompleted, setConfirmCompleted] = useState(false);
+
+  // How many lists are currently fully completed — drives whether the
+  // "Delete completed" shortcut button appears in select mode.
+  const completedListCount = lists.reduce(
+    (n, l) => (listStats[l.id]?.isComplete ? n + 1 : n),
+    0,
+  );
 
   const onCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -88,7 +97,7 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
   const allSelected = selectedListIds.size === lists.length && lists.length > 0;
 
   return (
-    <aside className="flex h-full w-full flex-col gap-3 border-border bg-surface p-3 sm:w-72 sm:border-r">
+    <aside className="flex h-full w-full min-w-0 flex-col gap-3 bg-surface p-3">
       {/* Header — varies by mode */}
       {listSelectMode ? (
         <div className="flex items-center justify-between gap-2">
@@ -162,7 +171,7 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
                     if (e.key === "Enter") commitRename();
                     if (e.key === "Escape") setEditingId(null);
                   }}
-                  className="min-h-[44px] flex-1 rounded-md border border-border bg-bg px-3 text-base text-fg"
+                  className="min-w-0 min-h-[44px] flex-1 rounded-md border border-border bg-bg px-3 text-base text-fg"
                 />
               ) : (
                 <button
@@ -229,15 +238,29 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
 
       {/* Footer — varies by mode */}
       {listSelectMode ? (
-        <button
-          type="button"
-          onClick={() => setConfirmBulk(true)}
-          disabled={selectedListIds.size === 0}
-          className="flex min-h-[44px] items-center justify-center gap-1 rounded-md bg-danger px-3 text-sm font-medium text-danger-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Trash2 size={16} />
-          Delete ({selectedListIds.size} selected)
-        </button>
+        <div className="flex flex-col gap-2">
+          {/* Shortcut: nuke every fully-completed list in one click.
+              Only shown when there's at least one such list. */}
+          {completedListCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmCompleted(true)}
+              className="flex min-h-[44px] items-center justify-center gap-1 rounded-md bg-accent px-3 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+            >
+              <Trash2 size={16} />
+              Delete completed ({completedListCount})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setConfirmBulk(true)}
+            disabled={selectedListIds.size === 0}
+            className="flex min-h-[44px] items-center justify-center gap-1 rounded-md bg-danger px-3 text-sm font-medium text-danger-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={16} />
+            Delete ({selectedListIds.size} selected)
+          </button>
+        </div>
       ) : (
         <form onSubmit={onCreate} className="flex gap-2 border-t border-border pt-3">
           <input
@@ -245,7 +268,9 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
             value={newListName}
             onChange={(e) => setNewListName(e.target.value)}
             placeholder="New list..."
-            className="min-h-[44px] flex-1 rounded-md border border-border bg-bg px-3 text-base text-fg placeholder:text-muted"
+            // min-w-0 lets the input shrink below its placeholder's
+            // intrinsic width so the "+" button never gets pushed out.
+            className="min-w-0 min-h-[44px] flex-1 rounded-md border border-border bg-bg px-3 text-base text-fg placeholder:text-muted"
           />
           <button
             type="submit"
@@ -273,7 +298,7 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
         }}
       />
 
-      {/* Bulk delete confirmation */}
+      {/* Bulk delete confirmation (selected) */}
       <ConfirmDialog
         open={confirmBulk}
         title={`Delete ${selectedListIds.size} list${selectedListIds.size === 1 ? "" : "s"}?`}
@@ -283,6 +308,19 @@ export function ListSidebar({ onSelect }: { onSelect?: () => void }) {
         onConfirm={async () => {
           await deleteSelectedLists();
           setConfirmBulk(false);
+        }}
+      />
+
+      {/* Bulk delete confirmation (completed) */}
+      <ConfirmDialog
+        open={confirmCompleted}
+        title={`Delete ${completedListCount} completed list${completedListCount === 1 ? "" : "s"}?`}
+        message="Every fully-completed list (and its items) will be permanently removed. Lists with unfinished items are not affected."
+        confirmLabel="Delete completed"
+        onCancel={() => setConfirmCompleted(false)}
+        onConfirm={async () => {
+          await deleteCompletedLists();
+          setConfirmCompleted(false);
         }}
       />
     </aside>

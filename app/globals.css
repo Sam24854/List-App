@@ -90,3 +90,41 @@ body {
 * {
   -webkit-tap-highlight-color: transparent;
 }
+
+/*
+ * Themed scrollbars.
+ *
+ * Default white scrollbars look bad in dark mode. We theme them with our
+ * surface/border CSS vars so they automatically match light vs dark.
+ *
+ * - Firefox uses `scrollbar-color` (thumb-color  track-color) and `scrollbar-width`.
+ * - WebKit/Chromium ignores those and uses `::-webkit-scrollbar-*` pseudos.
+ * - We set both so all browsers get a coherent look.
+ */
+* {
+  scrollbar-color: var(--color-border) var(--color-surface);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: 6px;
+  border: 2px solid var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted);
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--color-surface);
+}

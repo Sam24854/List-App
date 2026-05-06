@@ -61,6 +61,8 @@ type DataContextValue = {
   toggleListSelected: (id: string) => void;
   selectAllLists: () => void;
   deleteSelectedLists: () => Promise<void>;
+  /** Bulk-delete every list that is fully completed (items > 0 and all done). */
+  deleteCompletedLists: () => Promise<void>;
 
   // ---- List actions ----
   selectList: (id: string) => void;
@@ -204,27 +206,49 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   }, [lists]);
 
+  /**
+   * Shared cleanup: removes a set of list IDs from `lists` and `itemsByList`,
+   * and falls back to a sensible active list. Used by both `deleteSelectedLists`
+   * and `deleteCompletedLists` to keep their behavior identical.
+   */
+  const removeListsFromState = useCallback(
+    (ids: string[]) => {
+      const idSet = new Set(ids);
+      setLists((prev) => {
+        const next = prev.filter((l) => !idSet.has(l.id));
+        if (activeListId && idSet.has(activeListId)) {
+          setActiveListId(next[0]?.id ?? null);
+        }
+        return next;
+      });
+      setItemsByList((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
+      setSelectedListIds(new Set());
+      setListSelectMode(false);
+    },
+    [activeListId],
+  );
+
   const deleteSelectedLists = useCallback(async () => {
     const ids = Array.from(selectedListIds);
     if (ids.length === 0) return;
     await adapter.deleteLists(ids);
-    const idSet = new Set(ids);
-    setLists((prev) => {
-      const next = prev.filter((l) => !idSet.has(l.id));
-      // If active list is going away, fall back to the first remaining one.
-      if (activeListId && idSet.has(activeListId)) {
-        setActiveListId(next[0]?.id ?? null);
-      }
-      return next;
-    });
-    setItemsByList((prev) => {
-      const next = { ...prev };
-      for (const id of ids) delete next[id];
-      return next;
-    });
-    setSelectedListIds(new Set());
-    setListSelectMode(false);
-  }, [selectedListIds, activeListId]);
+    removeListsFromState(ids);
+  }, [selectedListIds, removeListsFromState]);
+
+  const deleteCompletedLists = useCallback(async () => {
+    // Build the list of IDs by reading current stats — does NOT depend on the
+    // user's manual selection, so they can wipe completed lists in one click.
+    const ids = lists
+      .filter((l) => listStats[l.id]?.isComplete)
+      .map((l) => l.id);
+    if (ids.length === 0) return;
+    await adapter.deleteLists(ids);
+    removeListsFromState(ids);
+  }, [lists, listStats, removeListsFromState]);
 
   // ---- Item actions ----
 
@@ -341,6 +365,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       toggleListSelected,
       selectAllLists,
       deleteSelectedLists,
+      deleteCompletedLists,
       selectList,
       createList,
       renameList,
@@ -366,6 +391,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       toggleListSelected,
       selectAllLists,
       deleteSelectedLists,
+      deleteCompletedLists,
       selectList,
       createList,
       renameList,

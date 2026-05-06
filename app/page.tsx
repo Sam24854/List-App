@@ -42,8 +42,11 @@ export default function Home() {
 
       {/* Two-pane body. On mobile, sidebar lives in the drawer; on desktop, inline. */}
       <div className="flex min-h-0 flex-1">
-        {/* Desktop sidebar (md+) */}
-        <div className="hidden md:flex md:shrink-0">
+        {/* Desktop sidebar (md+). Width lives on this wrapper rather than the
+            aside so the inner content always has a definite container —
+            otherwise flex layout falls back to intrinsic content size and
+            the "+" button can overflow into the main pane. */}
+        <div className="hidden md:flex md:w-72 md:shrink-0 border-r border-border">
           <ListSidebar />
         </div>
 
