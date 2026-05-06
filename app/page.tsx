@@ -16,7 +16,7 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { ListSidebar } from "@/components/lists/ListSidebar";
 import { ListView } from "@/components/lists/ListView";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { SettingsMenu } from "@/components/SettingsMenu";
 import { cn } from "@/lib/cn";
 
 export default function Home() {
@@ -36,7 +36,7 @@ export default function Home() {
         </button>
         <h1 className="text-lg font-semibold text-fg">List-App</h1>
         <div className="ml-auto">
-          <ThemeToggle />
+          <SettingsMenu />
         </div>
       </header>
 

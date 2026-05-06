@@ -63,8 +63,6 @@ export const localStorageAdapter: StorageAdapter = {
 
   async getLists() {
     const { lists } = read();
-    // Return a sorted-by-creation copy. Sorting in the adapter (not the UI) keeps
-    // the contract simple: "lists come back oldest first".
     return [...lists].sort((a, b) => a.createdAt - b.createdAt);
   },
 
@@ -96,19 +94,36 @@ export const localStorageAdapter: StorageAdapter = {
     write(snap);
   },
 
+  async deleteLists(ids) {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const snap = read();
+    snap.lists = snap.lists.filter((l) => !idSet.has(l.id));
+    for (const id of ids) delete snap.itemsByList[id];
+    write(snap);
+  },
+
   // ---- Items ----
 
   async getItems(listId) {
     const { itemsByList } = read();
     const items = itemsByList[listId] ?? [];
-    // Return sorted by position. Adapter owns the sort order; UI just renders.
     return [...items].sort((a, b) => a.position - b.position);
+  },
+
+  async getAllItemsByList() {
+    const { itemsByList } = read();
+    // Return a shallow copy with each list's items sorted by position.
+    const out: Record<string, Item[]> = {};
+    for (const [listId, items] of Object.entries(itemsByList)) {
+      out[listId] = [...items].sort((a, b) => a.position - b.position);
+    }
+    return out;
   },
 
   async createItem(listId, text) {
     const snap = read();
     const items = snap.itemsByList[listId] ?? [];
-    // New items go to the bottom. Position = (max existing position) + 1.
     const maxPos = items.reduce((m, i) => Math.max(m, i.position), -1);
     const item: Item = {
       id: newId(),
@@ -148,29 +163,27 @@ export const localStorageAdapter: StorageAdapter = {
     write(snap);
   },
 
-  async deleteItems(ids) {
-    const idSet = new Set(ids);
-    const snap = read();
-    for (const listId of Object.keys(snap.itemsByList)) {
-      snap.itemsByList[listId] = snap.itemsByList[listId].filter(
-        (i) => !idSet.has(i.id),
-      );
-    }
-    write(snap);
-  },
-
   async deleteAllItems(listId) {
     const snap = read();
     snap.itemsByList[listId] = [];
     write(snap);
   },
 
+  async deleteCompletedItems(listId) {
+    const snap = read();
+    const items = snap.itemsByList[listId] ?? [];
+    const remaining = items.filter((i) => !i.completed);
+    // Re-pack positions so they stay contiguous after the gaps.
+    remaining.forEach((item, idx) => {
+      item.position = idx;
+    });
+    snap.itemsByList[listId] = remaining;
+    write(snap);
+  },
+
   async reorderItems(listId, orderedIds) {
     const snap = read();
     const items = snap.itemsByList[listId] ?? [];
-    // Build a position lookup from the new order, then reassign positions.
-    // Items not present in `orderedIds` keep their relative order at the end —
-    // this shouldn't happen in normal flow but is a safe fallback.
     const indexOf = new Map(orderedIds.map((id, i) => [id, i]));
     items.sort((a, b) => {
       const ai = indexOf.get(a.id) ?? Infinity;

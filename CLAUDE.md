@@ -10,7 +10,7 @@ It will eventually be used by 1–3 people (mostly the owner) and integrated wit
 
 ## Phase tracker
 
-- [x] **Phase 1 — local frontend.** Multi-list todo app with localStorage persistence, drag-and-drop, light/dark theme, multi-select, all delete variants with confirmation, fully responsive (desktop + mobile drawer).
+- [x] **Phase 1 — local frontend.** Multi-list todo app with localStorage persistence, drag-and-drop, settings menu (theme + 8 accent presets), per-list completion indicator, list multi-select / delete-all, item-level "delete completed" / "delete all" with confirmation, fully responsive (desktop + mobile drawer).
 - [ ] **Phase 2 — backend.** Next.js API routes + Neon Postgres (via Vercel Marketplace) + Drizzle ORM + Auth.js (Credentials provider, email + bcrypt password). Swap `localStorageAdapter` → `apiAdapter`.
 - [ ] **Phase 3 — Discord bot.** discord.js bot with slash commands. One-time link via 6-digit code flow (web app generates code → user DMs bot → bot calls API → backend ties Discord ID to app account). Bot uses a shared bot secret for server-to-server auth.
 
@@ -25,7 +25,7 @@ It will eventually be used by 1–3 people (mostly the owner) and integrated wit
 | Icons | `lucide-react` |
 | State | React Context + `useState` hooks. No external state library. |
 | Storage | `StorageAdapter` interface in `lib/storage/types.ts` — Phase 1 impl is `localStorageAdapter.ts`, single JSON blob under `list-app:data:v1`. |
-| Theming | CSS variables on `:root` and `.dark`. `@custom-variant dark` directive. Theme persisted in `list-app-theme` localStorage key. |
+| Theming | CSS variables on `:root` and `.dark`. `@custom-variant dark` directive. Theme persisted in `list-app-theme`, accent in `list-app-accent`. Accent presets defined in `hooks/useAppearance.tsx` (8 named colors, each with light + dark variants); applied via inline `style.setProperty` on `<html>`. |
 | ID generation | `crypto.randomUUID()` via `lib/id.ts` |
 
 ## Architecture (the seam that matters)
@@ -42,24 +42,24 @@ Storage methods are async even in Phase 1 to match Phase 2's network calls — n
 
 ```
 app/                    # Next.js App Router
-  layout.tsx            # Root <html>, theme bootstrap script, mounts <Providers>
+  layout.tsx            # Root <html>, appearance bootstrap script, mounts <Providers>
   page.tsx              # Main app shell (top bar + responsive sidebar + list view)
-  providers.tsx         # ThemeProvider + DataProvider
+  providers.tsx         # AppearanceProvider + DataProvider
   globals.css           # Tailwind import, CSS vars, dark variant config
 components/
   ConfirmDialog.tsx     # Reusable destructive-action confirmation modal
-  ThemeToggle.tsx       # Sun/moon button
+  SettingsMenu.tsx      # Gear-icon dropdown — theme toggle + accent picker
   lists/
-    ListSidebar.tsx     # Left rail (or mobile drawer) — list of lists
+    ListSidebar.tsx     # Left rail (or mobile drawer) — list of lists with select mode + completion indicator
     ListView.tsx        # Right pane — header + add input + items + bulk bar
   items/
     AddItemInput.tsx
     ItemRow.tsx         # One sortable row (drag handle, completed, text, edit, delete)
     ItemList.tsx        # DndContext + SortableContext wrapper
-    BulkActionBar.tsx   # Sticky footer for "delete selected" / "delete all"
+    BulkActionBar.tsx   # Sticky footer — "Delete completed" + "Delete all"
 hooks/
-  useTheme.tsx          # ThemeProvider + useTheme() hook
-  useLists.tsx          # DataProvider + useLists() hook (lists, items, all actions)
+  useAppearance.tsx     # AppearanceProvider + useAppearance() hook (theme, accent, ACCENT_PRESETS)
+  useLists.tsx          # DataProvider + useLists() hook (lists, items, listStats, list select mode, all actions)
 lib/
   cn.ts                 # clsx wrapper for conditional classes
   id.ts                 # crypto.randomUUID() wrapper
@@ -77,6 +77,12 @@ lib/
 - Inputs use `text-base` (16px) so iOS Safari doesn't auto-zoom on focus.
 - Confirmation dialogs go through `<ConfirmDialog>` — don't roll new ones.
 - Single-item delete uses a custom event (`list-app:request-delete-item`) so the row doesn't have to thread a callback through dnd-kit's drag wrapping.
+
+## Bulk-delete pattern
+
+Items intentionally do **not** have a multi-select checkbox. To bulk-delete a subset of items, the user marks them complete (the round checkbox on each row) and then clicks "Delete completed". This kept the row layout to a single column of controls. Lists still have a true multi-select (sidebar `Select` button → checkboxes per row) because lists don't have a "complete" state to piggy-back on.
+
+A list is **complete** when `total > 0 && completed === total`. Empty lists are never marked complete (the user probably hasn't added anything yet). Computed in `useLists`'s `listStats`, derived from `itemsByList` (which holds items for *every* list, not just the active one — needed for the per-list stats in the sidebar).
 
 ## Phase 2 plan (when we get there)
 

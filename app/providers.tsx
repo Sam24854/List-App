@@ -1,24 +1,23 @@
 /*
  * Providers — wraps the entire app in our React contexts.
  *
- * Marked "use client" because the providers use React hooks (useState, useEffect)
- * and read from localStorage, which only exist in the browser. Server components
- * cannot use either.
+ * Marked "use client" because the providers use React hooks and read from
+ * localStorage, which only exist in the browser.
  *
- * Order matters: ThemeProvider must wrap DataProvider so theme is available
- * everywhere, including inside data-dependent components.
+ * Order matters: AppearanceProvider must wrap DataProvider so visuals are
+ * available everywhere, including inside data-dependent components.
  */
 
 "use client";
 
-import { ThemeProvider } from "@/hooks/useTheme";
+import { AppearanceProvider } from "@/hooks/useAppearance";
 import { DataProvider } from "@/hooks/useLists";
 import type { ReactNode } from "react";
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider>
+    <AppearanceProvider>
       <DataProvider>{children}</DataProvider>
-    </ThemeProvider>
+    </AppearanceProvider>
   );
 }

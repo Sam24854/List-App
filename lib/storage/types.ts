@@ -42,16 +42,24 @@ export interface StorageAdapter {
   createList(name: string): Promise<List>;
   renameList(id: string, name: string): Promise<void>;
   deleteList(id: string): Promise<void>;
+  /** Bulk delete several lists by ID — used by sidebar select mode. */
+  deleteLists(ids: string[]): Promise<void>;
 
   // ---- Items ----
   getItems(listId: string): Promise<Item[]>;
+  /**
+   * Returns items for every list, keyed by listId. Used so the UI can compute
+   * per-list completion status without N round-trips. In Phase 2 this will
+   * likely be replaced by a `getListsWithStats()` SQL query.
+   */
+  getAllItemsByList(): Promise<Record<string, Item[]>>;
   createItem(listId: string, text: string): Promise<Item>;
   updateItem(id: string, patch: Partial<Pick<Item, "text" | "completed">>): Promise<void>;
   deleteItem(id: string): Promise<void>;
-  /** Bulk delete by IDs (used by the "delete selected" feature). */
-  deleteItems(ids: string[]): Promise<void>;
   /** Wipe every item in a list (used by the "delete all" feature). */
   deleteAllItems(listId: string): Promise<void>;
+  /** Delete only completed items in a list (used by "Delete completed"). */
+  deleteCompletedItems(listId: string): Promise<void>;
   /** Persist a new visual order. `orderedIds` is the new top-to-bottom ID list. */
   reorderItems(listId: string, orderedIds: string[]): Promise<void>;
 }

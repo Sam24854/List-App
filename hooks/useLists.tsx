@@ -3,15 +3,22 @@
  *
  * Wraps the StorageAdapter (Phase 1: localStorage; Phase 2 will be an API)
  * and exposes:
- *   - the current array of lists,
- *   - the items in the currently-active list,
+ *   - the array of lists,
+ *   - items for the active list (derived from a per-list cache),
+ *   - per-list stats (total / completed / isComplete) for the sidebar,
  *   - which list is active,
- *   - which items the user has multi-selected (for bulk delete),
+ *   - sidebar select-mode state (so the user can multi-delete lists),
  *   - a full set of action functions that mutate data.
  *
  * Components call `useLists()` to read state and dispatch actions. They never
  * touch the adapter directly — that means swapping the adapter (Phase 2) does
  * not require any UI changes.
+ *
+ * Why store ALL items in memory (itemsByList) instead of just the active list:
+ * we need per-list completion stats for the sidebar (a list is "complete" when
+ * it has items and they're all done). Loading everything is fine for Phase 1
+ * (localStorage is fast and the dataset is small). In Phase 2 we'd replace
+ * `getAllItemsByList()` with a SQL aggregate that just returns counts.
  */
 
 "use client";
@@ -28,13 +35,32 @@ import {
 import { getStorageAdapter } from "@/lib/storage";
 import type { Item, List } from "@/lib/storage/types";
 
+/** Stats for a single list — derived from items. */
+export type ListStats = {
+  total: number;
+  completed: number;
+  /** True only when total > 0 and every item is completed. */
+  isComplete: boolean;
+};
+
 type DataContextValue = {
   // ---- State ----
   lists: List[];
+  /** Items in the currently active list, sorted by position. */
   items: Item[];
   activeListId: string | null;
-  selectedItemIds: Set<string>;
+  /** listId -> { total, completed, isComplete }. */
+  listStats: Record<string, ListStats>;
   loading: boolean;
+
+  // ---- Sidebar list-select mode ----
+  listSelectMode: boolean;
+  selectedListIds: Set<string>;
+  enterListSelectMode: () => void;
+  exitListSelectMode: () => void;
+  toggleListSelected: (id: string) => void;
+  selectAllLists: () => void;
+  deleteSelectedLists: () => Promise<void>;
 
   // ---- List actions ----
   selectList: (id: string) => void;
@@ -47,13 +73,11 @@ type DataContextValue = {
   updateItemText: (id: string, text: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
-  deleteItems: (ids: string[]) => Promise<void>;
+  /** Delete every completed item in the active list. */
+  deleteCompletedItems: () => Promise<void>;
+  /** Delete every item in the active list. */
   deleteAllItems: () => Promise<void>;
   reorderItems: (orderedIds: string[]) => Promise<void>;
-
-  // ---- Multi-select actions ----
-  toggleItemSelected: (id: string) => void;
-  clearSelection: () => void;
 };
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -62,30 +86,28 @@ const adapter = getStorageAdapter();
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [lists, setLists] = useState<List[]>([]);
-  const [items, setItems] = useState<Item[]>([]);
+  const [itemsByList, setItemsByList] = useState<Record<string, Item[]>>({});
   const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
-    new Set(),
-  );
   const [loading, setLoading] = useState(true);
 
+  // List multi-select (sidebar) state.
+  const [listSelectMode, setListSelectMode] = useState(false);
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(
+    new Set(),
+  );
+
   // ---- Initial load ----
-  // localStorage is only available in the browser, so this effect runs after
-  // mount. We pull lists, then auto-select the first one (if any) and load
-  // its items. After this, `loading` flips to false and the UI renders.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const loadedLists = await adapter.getLists();
+      const [loadedLists, loadedItems] = await Promise.all([
+        adapter.getLists(),
+        adapter.getAllItemsByList(),
+      ]);
       if (cancelled) return;
       setLists(loadedLists);
-      const first = loadedLists[0]?.id ?? null;
-      setActiveListId(first);
-      if (first) {
-        const loadedItems = await adapter.getItems(first);
-        if (cancelled) return;
-        setItems(loadedItems);
-      }
+      setItemsByList(loadedItems);
+      setActiveListId(loadedLists[0]?.id ?? null);
       setLoading(false);
     })();
     return () => {
@@ -93,26 +115,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Whenever the active list changes, reload its items and clear selection.
-  // We don't reload on every list mutation — actions that change items also
-  // update local state in lock-step.
-  useEffect(() => {
-    if (!activeListId) {
-      setItems([]);
-      return;
+  // ---- Derived values ----
+
+  const items = useMemo<Item[]>(
+    () => (activeListId ? (itemsByList[activeListId] ?? []) : []),
+    [activeListId, itemsByList],
+  );
+
+  const listStats = useMemo<Record<string, ListStats>>(() => {
+    const out: Record<string, ListStats> = {};
+    for (const list of lists) {
+      const li = itemsByList[list.id] ?? [];
+      const total = li.length;
+      const completed = li.reduce((c, i) => (i.completed ? c + 1 : c), 0);
+      out[list.id] = {
+        total,
+        completed,
+        isComplete: total > 0 && completed === total,
+      };
     }
-    let cancelled = false;
-    (async () => {
-      const loadedItems = await adapter.getItems(activeListId);
-      if (!cancelled) {
-        setItems(loadedItems);
-        setSelectedItemIds(new Set());
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeListId]);
+    return out;
+  }, [lists, itemsByList]);
 
   // ---- List actions ----
 
@@ -121,6 +144,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const createList = useCallback(async (name: string) => {
     const list = await adapter.createList(name);
     setLists((prev) => [...prev, list]);
+    setItemsByList((prev) => ({ ...prev, [list.id]: [] }));
     setActiveListId(list.id);
     return list;
   }, []);
@@ -137,15 +161,70 @@ export function DataProvider({ children }: { children: ReactNode }) {
       await adapter.deleteList(id);
       setLists((prev) => {
         const next = prev.filter((l) => l.id !== id);
-        // If we deleted the active list, fall back to the first remaining one.
         if (activeListId === id) {
           setActiveListId(next[0]?.id ?? null);
         }
         return next;
       });
+      setItemsByList((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     },
     [activeListId],
   );
+
+  // ---- Sidebar list-select mode ----
+
+  const enterListSelectMode = useCallback(() => {
+    setListSelectMode(true);
+    setSelectedListIds(new Set());
+  }, []);
+
+  const exitListSelectMode = useCallback(() => {
+    setListSelectMode(false);
+    setSelectedListIds(new Set());
+  }, []);
+
+  const toggleListSelected = useCallback((id: string) => {
+    setSelectedListIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllLists = useCallback(() => {
+    setSelectedListIds((prev) => {
+      // If everything is already selected, deselect everything (toggle behavior).
+      if (prev.size === lists.length) return new Set();
+      return new Set(lists.map((l) => l.id));
+    });
+  }, [lists]);
+
+  const deleteSelectedLists = useCallback(async () => {
+    const ids = Array.from(selectedListIds);
+    if (ids.length === 0) return;
+    await adapter.deleteLists(ids);
+    const idSet = new Set(ids);
+    setLists((prev) => {
+      const next = prev.filter((l) => !idSet.has(l.id));
+      // If active list is going away, fall back to the first remaining one.
+      if (activeListId && idSet.has(activeListId)) {
+        setActiveListId(next[0]?.id ?? null);
+      }
+      return next;
+    });
+    setItemsByList((prev) => {
+      const next = { ...prev };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+    setSelectedListIds(new Set());
+    setListSelectMode(false);
+  }, [selectedListIds, activeListId]);
 
   // ---- Item actions ----
 
@@ -153,7 +232,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     async (text: string) => {
       if (!activeListId || !text.trim()) return;
       const item = await adapter.createItem(activeListId, text);
-      setItems((prev) => [...prev, item]);
+      setItemsByList((prev) => ({
+        ...prev,
+        [activeListId]: [...(prev[activeListId] ?? []), item],
+      }));
     },
     [activeListId],
   );
@@ -162,92 +244,103 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const trimmed = text.trim();
     if (!trimmed) return;
     await adapter.updateItem(id, { text: trimmed });
-    setItems((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, text: trimmed } : i)),
-    );
+    setItemsByList((prev) => {
+      const next: Record<string, Item[]> = {};
+      for (const [listId, list] of Object.entries(prev)) {
+        next[listId] = list.map((i) =>
+          i.id === id ? { ...i, text: trimmed } : i,
+        );
+      }
+      return next;
+    });
   }, []);
 
   const toggleComplete = useCallback(async (id: string) => {
-    // Compute the new value from current state, then persist it.
-    setItems((prev) => {
-      const target = prev.find((i) => i.id === id);
-      if (!target) return prev;
-      const next = !target.completed;
-      // Fire-and-forget the adapter call. If it fails, we'd revert state in a
-      // real production app — here, localStorage doesn't fail.
-      adapter.updateItem(id, { completed: next });
-      return prev.map((i) => (i.id === id ? { ...i, completed: next } : i));
+    // Find the item to compute the new value, then persist + update state.
+    setItemsByList((prev) => {
+      const next: Record<string, Item[]> = {};
+      let newValue: boolean | null = null;
+      for (const [listId, list] of Object.entries(prev)) {
+        next[listId] = list.map((i) => {
+          if (i.id !== id) return i;
+          newValue = !i.completed;
+          return { ...i, completed: newValue };
+        });
+      }
+      if (newValue !== null) {
+        // Fire-and-forget. localStorage is sync; in Phase 2 we'd add error handling.
+        adapter.updateItem(id, { completed: newValue });
+      }
+      return next;
     });
   }, []);
 
   const deleteItem = useCallback(async (id: string) => {
     await adapter.deleteItem(id);
-    setItems((prev) => prev.filter((i) => i.id !== id));
-    setSelectedItemIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
+    setItemsByList((prev) => {
+      const next: Record<string, Item[]> = {};
+      for (const [listId, list] of Object.entries(prev)) {
+        next[listId] = list.filter((i) => i.id !== id);
+      }
       return next;
     });
   }, []);
 
-  const deleteItems = useCallback(async (ids: string[]) => {
-    if (ids.length === 0) return;
-    await adapter.deleteItems(ids);
-    const idSet = new Set(ids);
-    setItems((prev) => prev.filter((i) => !idSet.has(i.id)));
-    setSelectedItemIds(new Set());
-  }, []);
+  const deleteCompletedItems = useCallback(async () => {
+    if (!activeListId) return;
+    await adapter.deleteCompletedItems(activeListId);
+    setItemsByList((prev) => ({
+      ...prev,
+      [activeListId]: (prev[activeListId] ?? [])
+        .filter((i) => !i.completed)
+        // Re-pack positions to match the adapter.
+        .map((i, idx) => ({ ...i, position: idx })),
+    }));
+  }, [activeListId]);
 
   const deleteAllItems = useCallback(async () => {
     if (!activeListId) return;
     await adapter.deleteAllItems(activeListId);
-    setItems([]);
-    setSelectedItemIds(new Set());
+    setItemsByList((prev) => ({ ...prev, [activeListId]: [] }));
   }, [activeListId]);
 
   const reorderItems = useCallback(
     async (orderedIds: string[]) => {
       if (!activeListId) return;
       // Update local state immediately (snappy UX) then persist.
-      setItems((prev) => {
+      setItemsByList((prev) => {
+        const list = prev[activeListId] ?? [];
         const indexOf = new Map(orderedIds.map((id, i) => [id, i]));
-        const sorted = [...prev].sort(
+        const sorted = [...list].sort(
           (a, b) =>
             (indexOf.get(a.id) ?? Infinity) - (indexOf.get(b.id) ?? Infinity),
         );
-        return sorted.map((item, idx) => ({ ...item, position: idx }));
+        return {
+          ...prev,
+          [activeListId]: sorted.map((item, idx) => ({ ...item, position: idx })),
+        };
       });
       await adapter.reorderItems(activeListId, orderedIds);
     },
     [activeListId],
   );
 
-  // ---- Multi-select ----
-
-  const toggleItemSelected = useCallback((id: string) => {
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    setSelectedItemIds(new Set());
-  }, []);
-
   // useMemo prevents creating a new context object on every render, which would
-  // re-render every consumer unnecessarily. Each dependency is a stable callback
-  // or a piece of state we actually want to track.
+  // re-render every consumer unnecessarily.
   const value = useMemo<DataContextValue>(
     () => ({
       lists,
       items,
       activeListId,
-      selectedItemIds,
+      listStats,
       loading,
+      listSelectMode,
+      selectedListIds,
+      enterListSelectMode,
+      exitListSelectMode,
+      toggleListSelected,
+      selectAllLists,
+      deleteSelectedLists,
       selectList,
       createList,
       renameList,
@@ -256,18 +349,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateItemText,
       toggleComplete,
       deleteItem,
-      deleteItems,
+      deleteCompletedItems,
       deleteAllItems,
       reorderItems,
-      toggleItemSelected,
-      clearSelection,
     }),
     [
       lists,
       items,
       activeListId,
-      selectedItemIds,
+      listStats,
       loading,
+      listSelectMode,
+      selectedListIds,
+      enterListSelectMode,
+      exitListSelectMode,
+      toggleListSelected,
+      selectAllLists,
+      deleteSelectedLists,
       selectList,
       createList,
       renameList,
@@ -276,11 +374,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateItemText,
       toggleComplete,
       deleteItem,
-      deleteItems,
+      deleteCompletedItems,
       deleteAllItems,
       reorderItems,
-      toggleItemSelected,
-      clearSelection,
     ],
   );
 

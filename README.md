@@ -11,8 +11,11 @@ This README is also a learning guide. It explains *how* the code works, not just
 - 📋 **Multiple lists** — create, rename, delete, switch between them
 - ✅ **Per-item actions** — add, edit, mark complete, delete
 - 🔃 **Drag-and-drop reordering** — works with mouse, touch, and keyboard
-- ☑️ **Multi-select** — pick items with checkboxes for bulk operations
-- 🗑️ **Three delete modes** — single, selected, all — every one with confirmation
+- 🧹 **Bulk delete via completion** — mark items complete, then "Delete completed" wipes them all out (no separate multi-select column to clutter the row)
+- 🗑️ **Three delete modes** — single, completed, all — every one with confirmation
+- 📑 **List multi-select** — sidebar "Select" button reveals checkboxes for deleting many lists at once
+- 🏆 **List completion indicator** — a list with items shows as complete (✓ + strikethrough) when every item is done; empty lists never show as complete
+- ⚙️ **Settings menu** — gear icon in the top-right with theme toggle and 8 accent color presets (Crimson default, plus Rose, Amber, Emerald, Cyan, Indigo, Violet, Slate)
 - 🌗 **Light & dark mode** — dark by default, persisted across reloads, no flash on page load
 - 📱 **Fully responsive** — two-pane layout on desktop, slide-in drawer on mobile
 - 💾 **Local-first storage** — everything saves to your browser's localStorage
@@ -50,11 +53,11 @@ app/                  # Next.js pages (App Router)
   globals.css         # Theme tokens (CSS variables), Tailwind setup
 components/           # All UI components
   ConfirmDialog.tsx
-  ThemeToggle.tsx
-  lists/              # Sidebar with all your lists
+  SettingsMenu.tsx    # Gear icon → theme toggle + accent picker
+  lists/              # Sidebar with all your lists (with select mode + completion indicator)
   items/              # Items in the active list (rows, drag-and-drop, add input, bulk bar)
 hooks/
-  useTheme.tsx        # Light/dark toggle hook
+  useAppearance.tsx   # Theme + accent color hook (with named presets)
   useLists.tsx        # The big one — everything you can do with data
 lib/
   cn.ts               # Tailwind class helper
@@ -102,13 +105,15 @@ When you call an action like `addItem("buy milk")`:
 2. The hook updates its React state (`setItems(...)`).
 3. React re-renders everything that uses `useLists()`. The new item appears.
 
-### 4. Theme hook — `hooks/useTheme.tsx`
+### 4. Appearance hook — `hooks/useAppearance.tsx`
 
-Same pattern, smaller scope. `ThemeProvider` holds the current theme and a `toggleTheme` function. `useTheme()` reads them. When you toggle, we (a) flip React state, (b) add/remove the `.dark` class on `<html>`, (c) save to localStorage.
+Same pattern, smaller scope. `AppearanceProvider` holds the current `theme` ('light' | 'dark') and `accent` (one of 8 named presets like `'crimson'` or `'emerald'`). `useAppearance()` reads them. When you change either, we (a) update React state, (b) write CSS variables on `<html>` to the right colors for the new theme + accent, (c) save the choice to localStorage.
+
+The accent presets are defined right at the top of the file. Each has separate light-mode and dark-mode color values so contrast against the background stays good in both. Want to change the default red? Edit `crimson` and you're done. Want to add a new color? Add an entry to `ACCENT_PRESETS` and update the matching map in `app/layout.tsx` (the inline bootstrap script needs the same data to avoid a flash on page load).
 
 ### 5. Providers — `app/providers.tsx`
 
-Glues `<ThemeProvider>` and `<DataProvider>` around your app. Components inside can call both hooks.
+Glues `<AppearanceProvider>` and `<DataProvider>` around your app. Components inside can call both hooks.
 
 ### 6. Components — `components/`
 
@@ -116,24 +121,13 @@ These read state via the hooks and render UI. None of them touch localStorage. N
 
 ---
 
-## How the theme works
+## How theming works
 
-Tailwind v4 introduced CSS-first configuration. We define theme tokens in `app/globals.css`:
+Tailwind v4 introduced CSS-first configuration. We define base theme tokens in `app/globals.css`:
 
 ```css
-:root {                      /* light mode */
-  --color-bg: #ffffff;
-  --color-fg: #0a0a0a;
-  --color-accent: #991b1b;   /* darkish red */
-  /* ... */
-}
-
-.dark {                      /* dark mode overrides */
-  --color-bg: #0a0a0a;
-  --color-fg: #fafafa;
-  --color-accent: #b91c1c;
-  /* ... */
-}
+:root { --color-bg: #ffffff; --color-fg: #0a0a0a; ...; --color-accent: #991b1b; }
+.dark { --color-bg: #0a0a0a; --color-fg: #fafafa; ...; --color-accent: #b91c1c; }
 
 @theme inline {              /* expose vars as Tailwind utility colors */
   --color-bg: var(--color-bg);
@@ -144,9 +138,14 @@ Tailwind v4 introduced CSS-first configuration. We define theme tokens in `app/g
 
 After this, you can write `bg-bg`, `text-fg`, `bg-accent` in any component and the colors automatically swap when `.dark` is on `<html>`.
 
-**No flash of light mode**: if React added the `.dark` class on first render, you'd see a white page for a split second before it caught up. Instead, an inline `<script>` in `layout.tsx` runs *before* React hydrates, reads localStorage, and sets the class immediately.
+**Two layers of theming:**
 
-To change the accent color, edit two lines in `globals.css` and you're done.
+1. **Theme** (light vs dark) — the `.dark` class on `<html>` flips between the two color sets above.
+2. **Accent** (8 named presets in `useAppearance.tsx`) — when you pick a different accent in the settings menu, JavaScript writes inline CSS variables on `<html>`, overriding `--color-accent`, `--color-accent-hover`, and `--color-ring` with the values for the chosen accent + current theme.
+
+**No flash of wrong colors on load**: if React added these classes after first render, you'd see the page in default colors for a split second. Instead, an inline `<script>` in `layout.tsx` runs *before* React hydrates, reads both `list-app-theme` and `list-app-accent` from localStorage, and applies them immediately. Important detail: that script has a duplicate of the accent preset table — when you change one, change the other (the comment in `layout.tsx` reminds you).
+
+To add a new accent: add an entry to `ACCENT_PRESETS` in `hooks/useAppearance.tsx`, copy the same entry into the `ACCENTS` map in `app/layout.tsx`, done.
 
 ---
 
@@ -166,6 +165,24 @@ Three concepts:
 **Sensors** decide what gestures start a drag. We use `PointerSensor` (covers mouse + touch) with a 5px activation distance — tapping doesn't drag, but holding-and-moving does. We also include `KeyboardSensor` so users can reorder with space + arrow keys.
 
 When the user drops an item, `onDragEnd` calculates the new order and calls `reorderItems(orderedIds)` from `useLists`. The hook updates state immediately and persists to localStorage.
+
+---
+
+## How list completion works
+
+A list shows a ✓ and strikethrough in the sidebar when:
+
+```ts
+items.length > 0 && items.every(i => i.completed)
+```
+
+Empty lists are intentionally **not** marked complete — the user probably just hasn't added anything yet, so showing it as "done" would be misleading.
+
+Computing this for every list (not just the active one) means the hook needs to know about items in all lists. So `useLists` keeps a `Record<listId, Item[]>` map in memory and derives both:
+- `items` — items for the currently active list (what the right-pane renders)
+- `listStats` — `{ total, completed, isComplete }` per list (what the sidebar shows)
+
+For Phase 1, loading every item is fine (localStorage is fast, datasets are tiny). For Phase 2, we'll replace `getAllItemsByList()` with a SQL aggregate that returns counts only — the same `listStats` shape, far less data.
 
 ---
 

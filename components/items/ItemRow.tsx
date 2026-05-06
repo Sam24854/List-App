@@ -2,7 +2,7 @@
  * ItemRow — a single todo row.
  *
  * Renders:
- *   [select checkbox] [drag handle] [completed checkbox] [text or edit input] [edit btn] [delete btn]
+ *   [drag handle] [completed checkbox] [text or edit input] [edit btn] [delete btn]
  *
  * Drag-and-drop:
  *   We use the `useSortable` hook from @dnd-kit/sortable. It returns:
@@ -12,8 +12,13 @@
  *     - isDragging — true while this row is being dragged; we dim it.
  *
  * Editing:
- *   Click the pencil icon to swap the text into an editable input. Save on
- *   Enter or blur. Cancel on Escape.
+ *   Click the pencil icon (or double-click the text on desktop) to swap the
+ *   text into an editable input. Save on Enter or blur. Cancel on Escape.
+ *
+ * Deleting:
+ *   The trash icon dispatches a custom event ("list-app:request-delete-item")
+ *   that ListView catches to show the confirmation dialog. This avoids
+ *   threading a delete callback through dnd-kit's row wrapping.
  */
 
 "use client";
@@ -27,15 +32,7 @@ import { useLists } from "@/hooks/useLists";
 import type { Item } from "@/lib/storage/types";
 
 export function ItemRow({ item }: { item: Item }) {
-  const {
-    toggleComplete,
-    updateItemText,
-    deleteItem,
-    selectedItemIds,
-    toggleItemSelected,
-  } = useLists();
-
-  const isSelected = selectedItemIds.has(item.id);
+  const { toggleComplete, updateItemText } = useLists();
 
   // dnd-kit hook: gives us all the wiring needed for sortable behavior.
   const {
@@ -47,7 +44,6 @@ export function ItemRow({ item }: { item: Item }) {
     isDragging,
   } = useSortable({ id: item.id });
 
-  // The transform CSS comes from dnd-kit; we just apply it.
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -58,7 +54,6 @@ export function ItemRow({ item }: { item: Item }) {
   const [draft, setDraft] = useState(item.text);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // When we enter edit mode, focus the input and select all text.
   useEffect(() => {
     if (editing) {
       inputRef.current?.focus();
@@ -83,16 +78,11 @@ export function ItemRow({ item }: { item: Item }) {
     setEditing(false);
   };
 
-  // [request to confirm delete] is a separate action up-tree (the ListView
-  // handles confirmation). We just call the trigger here.
-  const onDeleteClick = async () => {
-    // ItemRow doesn't handle the confirmation dialog itself — it would clutter
-    // the row component. Instead the parent passes us a delete handler? For
-    // simplicity in v1, we delete directly. The plan calls for confirmation on
-    // single-item delete — we delegate to the ListView's confirm flow via a
-    // small custom event.
+  const onDeleteClick = () => {
     window.dispatchEvent(
-      new CustomEvent<string>("list-app:request-delete-item", { detail: item.id }),
+      new CustomEvent<string>("list-app:request-delete-item", {
+        detail: item.id,
+      }),
     );
   };
 
@@ -106,19 +96,7 @@ export function ItemRow({ item }: { item: Item }) {
         item.completed && "opacity-70",
       )}
     >
-      {/* Multi-select checkbox (separate from the "completed" checkbox). */}
-      <label className="flex h-11 w-6 shrink-0 cursor-pointer items-center justify-center">
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => toggleItemSelected(item.id)}
-          aria-label="Select item for bulk actions"
-          className="h-4 w-4 cursor-pointer accent-[var(--color-accent)]"
-        />
-      </label>
-
-      {/* Drag handle — only this element starts a drag (not the whole row).
-          That makes the row safe to tap on touch devices. */}
+      {/* Drag handle — only this element starts a drag. */}
       <button
         type="button"
         aria-label="Drag to reorder"
@@ -159,7 +137,6 @@ export function ItemRow({ item }: { item: Item }) {
         />
       ) : (
         <span
-          // Double-click to edit (desktop convenience). Tap pencil on mobile.
           onDoubleClick={startEdit}
           className={cn(
             "min-w-0 flex-1 truncate text-base text-fg sm:text-sm",
@@ -170,7 +147,6 @@ export function ItemRow({ item }: { item: Item }) {
         </span>
       )}
 
-      {/* Edit button — visible on hover (desktop) and always on mobile. */}
       {!editing && (
         <button
           type="button"
